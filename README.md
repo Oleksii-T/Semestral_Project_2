@@ -6,8 +6,7 @@ Purpose: graph creation using text data. Command-line oriented.
 
 Projects Content:
 src - main shell script,
-DefConf - configuration file where defualt functionality is described,
+DefConf - configuration file where default functionality is described,
 User_Documentation - obvious,
 Programmer_Documentation - obvious,
-TestData - few input samples,
-log - 
+TestData - few input samples.
