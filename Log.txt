@@ -1,0 +1,11 @@
+
+NTOES
+=====
+
+Change structure of progtam. 
+If used specified conf file then do not read def file.
+And check is def file is exist.
+
+check is timestamp is valid due to specified by used
+
+sort!

@@ -1,0 +1,51 @@
+# Created by tarbeole
+# Last modification: 2017-05-18
+ 
+# Timestamp format - see strftime(3c)
+# Default: TimeFormat [%Y-%m-%d %H:%M:%S]
+TimeFormat [%Y/%m/%d %H:%M:%S]
+
+# Max value y-axis - "auto" adjust, "max" value, fix value
+# E.g.: Ymax auto / Ymax max / Ymax 42
+# Default: Ymax max
+Ymax max
+ 
+# Min value y-axis - "auto" adjust, "min" value, fix value
+# E.g.: Ymin auto / Ymin min / Ymin -42
+# Default: Ymin min
+Ymin min
+ 
+# Speed - increment of records per frame
+# Speed/Time are exclusive
+# Default: Speed 1
+Speed 1
+ 
+# Animation duration in seconds
+# Speed/Time are exclusive
+# No default/unspecified: Time=Records/Speed/FPS
+#Time [value]
+ 
+# Frames per second (framerate)
+# Default: 25
+FPS 25
+ 
+# Legend - graph title (text string)
+# No default
+#legent [name]
+ 
+# GnuplotParam, parameter
+# This directive can be used more than once
+# No default
+#GnuplotParams [parameter]
+ 
+# Effect parameters, parameter=value, depends on used effect
+# This directive can be used more than once
+# Couple parameter=value can be user more than once, separated by :
+# No default
+EffectParams boxcolor=0:ylabel="yDim":xlabel="xDim"
+EffectParams boxwidth=1:borderscolor=-1:fillpattern=3
+EffectParams boxtitle=box:arrowstyle=head_empty_size_screen_0.03,15,135_ls_2
+
+# Project name, used for directory name
+# No default
+Name animation

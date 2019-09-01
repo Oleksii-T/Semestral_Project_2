@@ -1,0 +1,367 @@
+#!/bin/bash
+DEBUG=0 #turn of debugging
+finish=0 #indicates whether program finished its work.
+function err {
+	echo "$0[error]: $@" >&2
+	exit 1
+}
+
+function debug {
+	(( DEBUG )) && echo "$0[debug]: $@" >&2
+}
+
+function help {
+	echo "
+  Usage:  $0 [OPTIN]... [FILE]...
+
+          -h            this help
+          -t format     Time Format used to describe x axis
+          -Y value      max value y-axis
+          -y value      min value y-axis
+          -S speed      amountg of lines per one slide of animation
+          -T time       animation duration in seconds
+          -F fps        frames per second
+          -l legent     graph title
+          -g parameter  Gnuplot parameters. Can be called few times.
+          -e parameter  Effect parameters. Can be called few times.
+          -f path       ReadConfFile
+          -n name       Project name, used for directory name
+"
+}
+
+function cleanup {
+	debug "Function: 'cleanup'"
+	[[ -e $TMP ]] && rm -r $TMP
+	if [ $finish -eq 0 ]; then
+		[[ -e $fullname ]] && rm -r $fullname
+	fi
+	exit
+}
+
+function CheckEffectParams {
+	int='^-?[0-9]+$'
+	[[ -z $borc ]] || { [[ $borc =~ $int ]] || err "borders color '$borc' has to be an integer"; }
+	[[ -z $bc ]] || { [[ $bc =~ $int ]] || err "box color '$bc' has to be an integer"; }
+	[[ -z $bw ]] || { [[ $bw =~ ^([0-9]+|[0-9]*\.[0-9]+)$ ]] || err "box width '$bw' has to be a positive double"; }
+	[[ -z $bw ]] || { [[ "$(bc <<< "$bw >= 0")" == "1" && "$(bc <<< "$bw <= 1")" == "1" ]] || err "box width '$bw' has to be within 0 and 1"; }
+	[[ -z $bp ]] || { [[ $bp =~ $int ]] || err "filling pattern '$bp' has to be an integer"; }
+	[[ -z $bp ]] || { (( bp > 0 && bp < 7 )) || err "filling pattern '$bp' has to be in the range from 0 to 7"; }
+}
+
+function FillEffectParams {
+	debug "Function: 'FillEffectParams'"
+	ep=$(echo "${ep#:}" | tr ':' '\n')
+
+	for i in $(echo "$ep"); do
+		if [[ "${i,,}" =~ ^boxcolor ]]; then
+			bc=$(echo "$i" | cut -d'=' -f2)
+		elif [[ "${i,,}" =~ ^ylabel ]]; then
+			yl=$(echo "$i" | cut -d'=' -f2)	
+		elif [[ "${i,,}" =~ ^xlabel ]]; then
+			xl=$(echo "$i" | cut -d'=' -f2)	
+		elif [[ "${i,,}" =~ ^boxwidth ]]; then
+			bw=$(echo $i | cut -d'=' -f2)
+		elif [[ "${i,,}" =~ ^borderscolor ]]; then
+			borc=$(echo $i | cut -d'=' -f2)
+		elif [[ "${i,,}" =~ ^fillpattern ]]; then
+			bp=$(echo $i | cut -d'=' -f2)
+		elif [[ "${i,,}" =~ ^boxtitle ]]; then
+			bt=$(echo $i | cut -d'=' -f2)
+		elif [[ "${i,,}" =~ ^arrowstyle ]]; then
+			as=$(echo $i | cut -d'=' -f2-)
+			as=$(echo $as | tr '_' ' ')
+		fi
+	done
+	CheckEffectParams
+	[[ -z $borc ]] || borc=$(printf "set style fill solid border $borc")
+	[[ -z $bw ]] || bw=$(printf "set boxwidth $bw relative")
+	[[ -z $bc ]] ||	bc=$(printf "linecolor $bc")
+	[[ -z $yl ]] ||	yl=$(printf "set ylabel '$yl'")
+	[[ -z $xl ]] ||	xl=$(printf "set xlabel '$xl'")
+	[[ -z $bp ]] ||	bp=$(printf "fillstyle pattern $bp")
+	[[ -z $bt ]] ||	bt=$(printf "title '$bt'")
+	[[ -z $as ]] || { as=$(printf "set style arrow 1 $as"); as1="as 1"; }
+}
+
+function ReadConfFile {
+	debug "Function: 'ReadConfFile'"
+ 	TMP=$( mktemp -d ) || err "Cannot create temporary directory"
+ 	cp $1 $TMP/NewConf.txt 
+ 	awk -F\# '$1!="" { print $1 ;}' $1| sed '/^\s*$/d'  > $TMP/NewConf.txt
+	while read i; do
+  	if [[ "${i,,}" =~ ^timeformat ]]; then
+		tf=$(echo "$tf" | tr ' ' '_')
+		[[ -z $tf ]] && { tf=$(echo "$i" | cut -d' ' -f2-); tf=$(echo "$tf" | tr ' ' '_'); echo "$tf"; }	  	
+  	elif [[ "${i,,}" =~ ^ymax ]]; then
+ 	  	yx=$(echo "$i" | cut -d' ' -f2)
+		elif [[ "${i,,}" =~ ^ymin ]]; then
+ 	  	yn=$(echo "$i" | cut -d' ' -f2)
+		elif [[ "${i,,}" =~ ^speed ]]; then
+ 	  	s=$(echo "$i" | cut -d' ' -f2)
+		elif [[ "${i,,}" =~ ^time ]]; then
+ 	 		t=$(echo "$i" | cut -d' ' -f2)
+ 	 	elif [[ "${i,,}" =~ ^fps ]]; then
+ 	 		fps=$(echo "$i" | cut -d' ' -f2)   
+ 	 	elif [[ "${i,,}" =~ ^legent ]]; then
+ 	 		l=$(echo "$i" | cut -d' ' -f2-)
+ 	 	elif [[ "${i,,}" =~ ^gnuplotparams ]]; then
+ 	 		spare=$(echo "$i" | cut -d' ' -f2-)
+ 	 		[[ ${spare,,} =~ gnuplotparams ]] && continue
+ 	 		gp=$(printf "$gp\n$spare")
+ 	 	elif [[ "${i,,}" =~ ^effectparams ]]; then
+ 	  	spare=$(echo "$i" | cut -d' ' -f2-)
+ 	  	[[ ${spare,,} =~ effectparams ]] && continue
+			ep=$(printf "$ep:$spare")
+ 	 	elif [[ "${i,,}" =~ ^name ]]; then
+ 	  	n=$(echo "$i" | cut -d' ' -f2)
+ 	 	fi
+	done < $TMP/NewConf.txt
+	rm -r $TMP
+}
+
+function CheckOptions {
+	debug "Function: 'CheckOptions'"
+	if [[ $fps =~ ^-?[0-9]+$ ]]; then
+		[[ $fps -le 0 ]] && err "FPS '$fps' has to be > 0"; else
+		err "FPS '$fps' has to be integer"; fi
+	if [[ $s =~ ^[-+]?([0-9]+|[0-9]*\.[0-9]+)$ ]]; then
+		[[ "$(bc <<< "$s <= 0")" == "1" ]] && err "Speed '$s' has to be > 0"; else
+		err "Speed '$s' has to intager or double"; fi
+	[[ ${yx,,} =~ ^auto$ || ${yx,,} =~ ^max$ || $yx =~ ^[-+]?([0-9]+|[0-9]*\.[0-9]+)$ ]] || err "y max value '$yx' has to be weather 'auto' or 'max' or 'const'"
+	[[ ${yn,,} =~ ^auto$ || ${yn,,} =~ ^min$ || $yn =~ ^[-+]?([0-9]+|[0-9]*\.[0-9]+)$ ]] || err "y min value '$yx' has to be weather 'auto' or 'max' or 'const'"
+	[[ $DEBUG =~ ^-?[0-9]+$ ]] || err "Debug value '$DEBUG' has to be integer"
+	[[ -z $ep ]] || FillEffectParams
+	[[ -z $bt ]] && bt="notitle"
+}
+
+function CheckTimeStampDigit {
+	tmp=0
+	tfTMP=$(echo $1 | sed 's/[^0-9]/ /g')
+	tfTMP=$(echo $tfTMP | tr -s ' ')
+	for i in $tfTMP; do
+		i=$(echo $((10#$i)))
+		case $tmp in
+			0) [[ ${#i} -gt 4 ]] && err "Invalid year";;
+			1) [[ ${#i} -gt 2 ]] && err "Invalid month " || { [[ $i -ge 1 && $i -le 12 ]] || err "Invalid month"; };;
+			2) [[ ${#i} -gt 2 ]] && err "Invalid day" || { [[ $i -ge 1 && $i -le 31 ]] || err "Invalid day"; };;
+			3) [[ ${#i} -gt 2 ]] && err "Invalid hour" || { [[ $i -ge 0 && $i -le 24 ]]  || err "Invalid hour"; };;
+			4) [[ ${#i} -gt 2 ]] && err "Invalid minute $i" || { [[ $i -ge 0 && $i -le 60 ]] || err "Invalid minute $i"; };;
+			5) [[ ${#i} -gt 2 ]] && err "Invalid second" || { [[ $i -ge 0 && $i -le 60 ]] || err "Invalid second"; };;
+		esac
+		((tmp++))
+	done
+	[[ tmp -ne 5 ]] || err "Invalid(size)"
+}
+
+function CheckData {
+	debug "Function: 'CheckData'"
+	tsRE=$tf
+	tsRE=$(echo $tsRE | sed 's/%d/[0-9][0-9]/')
+	tsRE=$(echo $tsRE | sed 's/%m/[0-9][0-9]/')
+	tsRE=$(echo $tsRE | sed 's/%y/[0-9][0-9]/')
+	tsRE=$(echo $tsRE | sed 's/%Y/[0-9][0-9][0-9][0-9]/')
+	tsRE=$(echo $tsRE | sed 's/%j/[0-9][0-9][0-9]/')
+	tsRE=$(echo $tsRE | sed 's/%H/[0-9][0-9]/')
+	tsRE=$(echo $tsRE | sed 's/%M/[0-9][0-9]/')
+	tsRE=$(echo $tsRE | sed 's/%s/[0-9]+/')
+	tsRE=$(echo $tsRE | sed 's/%S/[0-9][0-9]/')
+	tsRE=$(echo $tsRE | sed 's/%b/[A-Za-z]+/')
+	tsRE=$(echo $tsRE | sed 's/%B/[A-Za-z]+/')	
+	#tsRE=$(echo "$tsRE -?[0-9]+.?[0-9]+^")
+	while IFS='' read -r line || [[ -n "$line" ]]; do		
+		line=$(echo $line | cut -f1 -d' ')
+		[[ $line =~ $tsRE ]] || err "Invalid time stamp in datals file.
+$line vs
+$tsRE"
+		CheckTimeStampDigit $line
+	done < "$TMP/whole.txt"
+	sort -k1,1 -o "$TMP/whole.txt" "$TMP/whole.txt"
+#exit
+}
+
+#int main (void) {                                   (##)
+
+#OPTIN PROCESSING----------------------------------------------------
+  #flag - used to determine whether 'speed' option was read from comm. line or not
+	flag=0
+	conffile=""
+	while getopts t:Y:y:S:T:F:l:g:e:f:n:d:h opt
+	do
+		case $opt in    
+			t) tf=$OPTARG;;
+			Y) yx=$OPTARG;;
+			y) yn=$OPTARG;;
+			S) s=$OPTARG; flag=1;;
+			T) t=$OPTARG;;
+			F) fps=$OPTARG;;
+			l) l=$OPTARG;;  
+			g) gp=$(printf "$gp\n$OPTARG");;
+			e) ep=$(printf "$ep:$OPTARG");;
+			f) conffile=$OPTARG;;
+			n) n=$OPTARG;;
+			d) DEBUG=$OPTARG;;
+			h) help; exit 0;;
+	  	\?) help >&2; exit 1;;
+		esac
+	done
+	shift $((OPTIND-1))
+	trap 'cleanup' INT TERM EXIT
+
+	if [ -z $conffile ]; then
+		debug "Read default conf. file"
+		#ReadConfFile ./DefConf
+		[[ -f "./DefConf" ]] && ReadConfFile ./DefConf || err "Default conf. file can not be found or not a file"
+	else	
+		debug "Read '$conffile' as a conf. file"
+		[[ -f $conffile ]] && ReadConfFile $conffile || err "'$conffile' can not be found or not a file"
+	fi
+	
+	CheckOptions
+#LOOP ITERATING THROW INPUT FILES & MERGING THEM-----------------------
+	#TMP - temporary directory where merged & sorted file is stored
+	TMP=$( mktemp -d ) || err "Cannot create temporary directory"
+	touch $TMP/whole.txt
+	touch $TMP/spare.txt
+
+	for DATA
+	do
+		cat $DATA >> $TMP/whole.txt
+	done
+
+#SOME MORE CHECKS & FILLING VARIABLES----------------------------------
+	#LINES - number of lines 
+	#D - Number of digits
+	#columns - amount of columns in input file due to ' ' delimiter
+	[ $# -ge 1 ] || err "datafile missing"
+	[ -f "$TMP/whole.txt" ] || err "'$TMP/whole.txt' is not a file"
+	[ -r "$TMP/whole.txt" ] || err "'$TMP/whole.txt' file is not readable"
+	[ -s "$TMP/whole.txt" ] || err "'$TMP/whole.txt' file is empty"
+	LINES=$( wc -l < "$TMP/whole.txt")
+	[[ "$(bc <<< "$s >= $LINES")" == "1" ]] && err "Speed option '$s' has to be less than lines in '/$TMP/whole.txt' file [$LINES]" 
+	if [ $flag -eq 1 ]; then
+		[[ -z ${t+x} ]] || {
+			tmp=$(echo "$LINES $s $fps" | awk '{printf "%f", $1/$2/$3}');
+			[ $(bc <<< "$t == $tmp") -eq 1 ] || {
+				debug "Try '$tmp' as a time."
+				err "Impossible combination of fps '$fps', time '$t' and speed '$s'";
+			}
+		}
+	else
+		[[ -z ${t+x} ]] || {
+			#Internal speed computation
+			s=$(echo "$LINES $t $fps" | awk '{printf "%f", $1/($2*$3)}');
+			debug "speed was changed to '$s'"
+		}
+	fi
+	D=${#LINES}
+	colums=$(head -1 "$TMP/whole.txt" | awk -F' ' '{printf ("%d\n"), NF}')
+
+#GETTING RID OF SPACES-------------------------------------------------
+	#steps - hold int which represent how many substitutions required to 
+	#      \ get rid of all spaces
+	steps=$(echo $((colums-2)))
+	for ((i=1;i<=$steps;i++)); do
+		cat /dev/null > $TMP/spare.txt
+		sed 's/ /_/' $TMP/whole.txt >> $TMP/spare.txt
+		cat /dev/null > $TMP/whole.txt
+		cat $TMP/spare.txt >> $TMP/whole.txt
+	done
+	CheckData
+	
+#NAME OF DIR CREATION--------------------------------------------------
+	#fullname - name of directory in which output of the program will be written
+	fullname="./"$n""
+	if [[ -e "$n" ]]; then
+		for ((i=1;;i++)); do
+			[[ -e ""$n"_"$i"" ]] && continue || { fullname="./"$n"_"$i""; break; }
+		done
+	fi
+	mkdir "$fullname"
+
+#Y_RANGE---------------------------------------------------------------
+	#autox and auton - indicated that 'auto' option was used
+	#yx/yn - holds max and min values of y-axis if max/min was specified
+	#        else hold '*' as a 'auto' flag for gnuplot
+	[[ $yx =~ ^max ]] && yx=$( awk 'NR==1   { max=$NF }
+             											$NF>max { max=$NF }
+		         											END     { print max }' "$TMP/whole.txt" )
+	[[ $yn =~ ^min ]] && yn=$( awk 'NR==1   { min=$NF }
+									             		$NF<min { min=$NF }
+            	 								 		END     { print min }' "$TMP/whole.txt")
+	[[ $yx =~ ^auto ]] && { yx="*"; autox=1; }
+	[[ $yn =~ ^auto ]] && { yn="*"; auton=1; }
+	#echo "@Y range-> ["$yn":"$yx"]"
+
+#X_RANGE---------------------------------------------------------------
+	#xn/xx - range of x-axis
+	xn=$(head -1 "$TMP/whole.txt" | cut -d' ' -f1)
+	xx=$(tail -1 "$TMP/whole.txt" | cut -d' ' -f1)
+	#echo "@X range-> ["$xn":"$xx"]"
+	
+#IMAGE CTEATION--------------------------------------------------------
+	#i - value responsible for amount of frames / line which is plotted
+	#j - value used to name frames
+	#f1/f2 - coordinates where arrow will start (from)
+	#t1/t2 - coordinates where arrow will end (to)
+	#flag - used to determine whether arrow should be drawn or not
+	#as/as1 - two connected variables define style of arrow
+	#bw - boxwidth
+	#borc - border colors
+	#gp - users options
+	#bc - box color
+	#bp - boxes filling pattern
+	#bt - box title
+  debug "Ploting of data started. ^^^"
+	for ((ii=1,j=1;;j++))
+	do
+		i=$(echo $ii | awk '{print int($1)}')
+		currX=$(head -n $i "$TMP/whole.txt" | tail -1 | cut -d' ' -f1)
+	  currY=$(head -n $i "$TMP/whole.txt" | tail -1 | awk -F' ' '{printf ("%f\n"), $NF}')
+		debug "$j) Ploting: [$currX:$currY]"
+		flag=0
+		if [ "$(bc <<< "$currY < 0")" -eq 1 ]; then
+			if (( !auton )); then
+				 [ "$(bc <<< "$currY != $yn ")" -eq 1 ] && { flag=1; f1=$currX; f2=$yn; t1=$currX; t2=$currY; }
+			fi
+		else
+			if (( !autox )); then
+			 [ "$(bc <<< "$currY != $yx ")" -eq 1 ] && { flag=1; f1=$currX; f2=$yx; t1=$currX; t2=$currY; }
+			fi
+		fi
+		echo "set terminal png
+					set output '`printf %s/%0${D}d $fullname $j`.png';
+					set title '$l';
+					$xl;
+					$yl;
+					set timefmt '$tf';
+					set yrange [$yn:$yx];
+		      set xdata time;
+  	 			set xrange ['$xn':'$xx'];
+		      set format x;
+		      $as
+		      $bw;
+		      $borc;
+					$gp;
+					if ( $flag == 1 ) \
+						set arrow from '$f1',$f2 to '$t1',$t2 $as1;
+					plot '<head -n $i $TMP/whole.txt' u 1:2 w boxes $bc $bp $bt;
+					" | gnuplot 2>/dev/null
+		ii="$(bc <<< "$ii + $s")"    
+    [[ "$(bc <<< "$ii <= $LINES")" == "1" ]] || break
+	done
+	debug "Ploting of data is over. vvv"
+
+#IMAGE JOINING---------------------------------------------------------
+	ffmpeg -y -i ""$fullname"/%0${D}d.png" ""$fullname"/Animation.mp4" 2>/dev/null || {
+		echo "$0[error]: Animation was not created because 'avconv' is not installed.";
+	}
+	finish=1
+	#check return value
+	if (( DEBUG )); then
+		debug "Content of '$fullname':"
+		ls $fullname
+	fi
+	debug "The program finished its work."
+	#rm -r $fullname
+#return 0; }                            (##)
+

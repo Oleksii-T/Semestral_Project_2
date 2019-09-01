@@ -1,0 +1,55 @@
+
+Programmers documentation.
+**************************
+
+Overview of functions.
+=====================
+
+1. 'err'-------Accept one string argument. Used to handle errors in script.
+               It prints error message and terminates the program.
+2. 'debug'-----Accept one int argument. Used to trace the stage of the program.
+               Can be turnded on/off with variable 'DEBUG'(option '-d').
+3. 'help'------Used to print main information about script usage 
+               Gives overview of syntax and valid options.
+4. 'cleanup'---Used as a save function to delete generated file.
+5. 'CheckEffectParams'---Checks the validity of variables, Else use 'err' func
+6. 'FillEffectParams'----Spread one var 'ep' which contain all Effect Parameters
+                         to individual variables. After spreading call 
+                         func 'CheckEffectParams'. And then, formulate each
+                         variable to understandable form for Gnuplot.
+7. 'ReadConfFile'--------Used to read whether Default configuration file (which
+                         always read in the very beginning of the script) or
+                         specified by user file. Creates temporary directory 
+                         and copy there simplified configuration file.
+                         Fills appropriate variables to further usage.
+                         Calls 'FillEffectParams' and delete tmp directory
+8. 'CheckOptions'--------Checks the validity of variables, after option processing.
+9. 'CheckTimeStampDigit'-Make sure that years, months, days, hours, minutes
+                         and seconds are valid.
+10. 'CheckData'----------Firstly make regular expresion from timestamp, then
+                         compare it with each timestamp is file.
+                         If everything is fine, make sort of merged tmp file.
+
+Main steps in body.
+===================
+
+1. Default Configuration file is read by calling 'ReadConfFile'.
+2. Option processing.
+3. Iterating through DATA(input files) and merging them into one text file,
+   which is located in temporary directory.
+4. Checking for validity of input file and variables, filling few usefull
+   variables used in further computation. Check correctness of data file.
+   Make sorting.
+5. Substitution of all spaces within timestamp with '_' in order to facilitate
+   work of gnuplot
+6. Computing Y and X axis range.
+7. Loop of image creation. With each iteration, one frame is generated.
+8. One last command: joining frames into animation.
+
+Debug.
+======
+
+One additional parameter is 'debug' is allowed. You could specify it by -d [value].
+To enable full monitoring of the program just enter any not 0 int as a value.
+[0] value is used to turn off the debuging(used by default).
+.
